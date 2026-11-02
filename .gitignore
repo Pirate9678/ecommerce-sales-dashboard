@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Data artefacts you can regenerate (kept out of git; regenerate via scripts)
+# Uncomment to exclude large CSVs from version control:
+# data/raw/ecommerce_orders.csv
+# data/final/ecommerce_sales_clean.csv
+
+# SQLite scratch DBs
+*.db
+*.sqlite3
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

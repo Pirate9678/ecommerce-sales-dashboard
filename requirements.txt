@@ -1,0 +1,5 @@
+# Data pipeline + validation (pandas, numpy)
+pandas>=2.0
+numpy>=1.24
+# Reference preview chart
+matplotlib>=3.6
