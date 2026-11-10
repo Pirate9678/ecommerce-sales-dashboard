@@ -16,7 +16,22 @@ Mirrors sql/cleaning.sql rule-for-rule AND in the same order:
               order_month = first day of order month.
 
 Output: data/final/ecommerce_sales_clean.csv
+
+OPTIMISED (Nov 2026): the old version converted dates to Python ``date``
+objects (``.dt.date``) and derived order_month through
+``to_period("M").dt.to_timestamp().dt.date`` — object-dtype round trips
+that dominated runtime — and applied its five validity filters as five
+separate copies of the whole frame. This version keeps dates as datetime64
+throughout, derives order_month with a single ``astype("datetime64[M]")``,
+applies all validity rules as ONE combined boolean mask, and formats date
+strings once, at write time, with a C-level datetime64->str conversion.
+Output is byte-identical to the old version on the same raw input
+(verified in benchmark/benchmark.py).
+
+  python3 data/clean_data.py
+  python3 data/clean_data.py --raw /tmp/raw_1m.csv --out /tmp/clean_1m.csv
 """
+import argparse
 import pandas as pd
 from pathlib import Path
 
@@ -25,22 +40,29 @@ RAW = BASE / "raw" / "ecommerce_orders.csv"
 OUT = BASE / "final" / "ecommerce_sales_clean.csv"
 VALID_REGIONS = {"North", "South", "East", "West", "Central"}
 
+TEXT_COLS = ["region", "state", "city", "product_category", "product_name",
+             "customer_age_group", "customer_gender", "payment_method",
+             "order_status", "customer_id", "order_id"]
+
 
 def main():
-    df = pd.read_csv(RAW, dtype=str)
+    ap = argparse.ArgumentParser(description="Clean raw e-commerce orders.")
+    ap.add_argument("--raw", type=Path, default=RAW)
+    ap.add_argument("--out", type=Path, default=OUT)
+    args = ap.parse_args()
+
+    df = pd.read_csv(args.raw, dtype=str)
     n_raw = len(df)
 
-    # 1. standardise text
-    for c in ["region", "state", "city", "product_category", "product_name",
-              "customer_age_group", "customer_gender", "payment_method",
-              "order_status", "customer_id", "order_id"]:
+    # 1. standardise text (vectorised str ops, unchanged from the old version)
+    for c in TEXT_COLS:
         df[c] = df[c].str.strip()
     df["region"] = df["region"].str.title()
     df["product_category"] = df["product_category"].str.title()
 
-    # 2. cast
+    # 2. cast — dates stay datetime64 (no .dt.date object round trip)
     df["order_date"] = pd.to_datetime(df["order_date"], format="%Y-%m-%d",
-                                      errors="coerce").dt.date
+                                      errors="coerce")
     df["quantity"] = pd.to_numeric(df["quantity"], errors="coerce")
     df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce")
     df["discount_pct"] = pd.to_numeric(df["discount_pct"],
@@ -49,24 +71,31 @@ def main():
     # 3. dedupe on standardised/cast values (== SELECT DISTINCT in cleaning.sql)
     df = df.drop_duplicates(keep="first")
 
-    # 4. validity filters
-    df = df.dropna(subset=["order_date"])
-    df = df.dropna(subset=["quantity", "unit_price"])
-    df = df[(df["quantity"] > 0) & (df["unit_price"] > 0)]
+    # 4. validity filters — ONE combined mask, not five sequential copies:
+    # each df[mask] copies the whole frame, so filtering in one pass is
+    # ~4 full-frame copies cheaper at 1M rows.
+    keep = (df["order_date"].notna()
+            & df["quantity"].notna() & df["unit_price"].notna()
+            & (df["quantity"] > 0) & (df["unit_price"] > 0)
+            & df["region"].isin(VALID_REGIONS)
+            & df["customer_id"].notna() & (df["customer_id"] != ""))
+    df = df[keep]
     df["quantity"] = df["quantity"].astype(int)
-    df = df[df["region"].isin(VALID_REGIONS)]
-    df = df.dropna(subset=["customer_id"])
-    df = df[df["customer_id"] != ""]
 
     # 5. derived columns
     df["net_revenue"] = (df["quantity"] * df["unit_price"]
                          * (1 - df["discount_pct"] / 100)).round(2)
-    df["order_month"] = pd.to_datetime(df["order_date"]).dt.to_period("M") \
-        .dt.to_timestamp().dt.date
+    # datetime64[M] truncates to the first of the month in one vectorised op
+    df["order_month"] = df["order_date"].values.astype("datetime64[M]")
 
     df = df.sort_values(["order_date", "order_id"]).reset_index(drop=True)
-    df["order_date"] = df["order_date"].astype(str)
-    df["order_month"] = df["order_month"].astype(str)
+
+    # Format dates to strings only now, at write time. datetime64 -> str is
+    # a C-level conversion and produces the identical 'YYYY-MM-DD' strings
+    # as the old version's .astype(str) on date objects (NaT rows are
+    # already filtered out, so no 'NaT' string can leak in).
+    df["order_date"] = df["order_date"].values.astype("datetime64[D]").astype(str)
+    df["order_month"] = df["order_month"].values.astype("datetime64[D]").astype(str)
 
     cols = ["order_id", "order_date", "order_month", "region", "state", "city",
             "product_category", "product_name", "quantity", "unit_price",
@@ -74,12 +103,12 @@ def main():
             "customer_gender", "payment_method", "order_status"]
     df = df[cols]
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(OUT, index=False)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(args.out, index=False)
     print(f"raw={n_raw:,} -> cleaned={len(df):,} "
           f"({n_raw - len(df):,} rows removed, "
           f"{(n_raw - len(df)) / n_raw:.1%} dirty)")
-    print(f"Wrote {OUT}")
+    print(f"Wrote {args.out}")
 
 
 if __name__ == "__main__":
