@@ -62,10 +62,15 @@ def initcap(s):
     return s.strip().title() if s else s
 
 
-def build_db():
+def build_db(raw_csv=RAW_CSV, clean_csv=CLEAN_CSV, composite_indexes=True):
     """Build the in-memory SQLite DB: schema + raw load + ETL + views.
     SQLite adaptation of sql/schema.sql, sql/cleaning.sql and
-    sql/dashboard_views.sql (same rules, same logic). Returns (con, cur)."""
+    sql/dashboard_views.sql (same rules, same logic). Returns (con, cur).
+
+    composite_indexes=False builds the pre-Nov-2026 index set (single-column
+    only) so benchmark/benchmark.py can measure what the composite indexes
+    are worth at each scale.
+    """
     con = sqlite3.connect(":memory:")
     con.create_function("regexp", 2, regexp)
     con.create_function("valid_date", 1, valid_date)
@@ -73,7 +78,21 @@ def build_db():
     cur = con.cursor()
 
     # ---- schema (SQLite adaptation of sql/schema.sql) ---------------------
-    cur.executescript("""
+    idx_extra = """
+        -- Covering composite indexes (Nov 2026, mirrors sql/schema.sql):
+        -- every view filters order_status='Delivered' first, then groups by
+        -- one more column; the trailing key columns carry the measures so
+        -- the planner reads the index only. Measured in benchmark/benchmark.py.
+        CREATE INDEX idx_fact_status_month_region
+            ON fact_sales (order_status, order_month, region, net_revenue);
+        CREATE INDEX idx_fact_status_product
+            ON fact_sales (order_status, product_key, net_revenue, quantity, discount_pct);
+        CREATE INDEX idx_fact_status_customer
+            ON fact_sales (order_status, customer_key, net_revenue);
+        CREATE INDEX idx_fact_status_payment
+            ON fact_sales (order_status, payment_method, net_revenue);
+    """ if composite_indexes else ""
+    cur.executescript(f"""
         CREATE TABLE raw_orders (
             order_id TEXT, order_date TEXT, region TEXT, state TEXT, city TEXT,
             product_category TEXT, product_name TEXT, quantity TEXT,
@@ -101,10 +120,11 @@ def build_db():
         CREATE INDEX idx_fact_order_month ON fact_sales (order_month);
         CREATE INDEX idx_fact_region      ON fact_sales (region);
         CREATE INDEX idx_fact_status      ON fact_sales (order_status);
+        {idx_extra}
     """)
 
     # ---- load raw CSV ------------------------------------------------------
-    with open(RAW_CSV, newline="", encoding="utf-8") as fh:
+    with open(raw_csv, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     cur.executemany(
         "INSERT INTO raw_orders VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -248,10 +268,10 @@ def build_db():
     return con, cur
 
 
-def run_checks(con):
+def run_checks(con, clean_csv=CLEAN_CSV):
     """Validate the built DB against data/final/ecommerce_sales_clean.csv."""
     import pandas as pd
-    clean = pd.read_csv(CLEAN_CSV)
+    clean = pd.read_csv(clean_csv)
     cur = con.cursor()
     n_fact = cur.execute("SELECT COUNT(*) FROM fact_sales").fetchone()[0]
     check("fact row count == cleaned CSV row count", n_fact == len(clean),
@@ -262,7 +282,7 @@ def run_checks(con):
     rev_csv = float(clean.loc[clean.order_status == "Delivered", "net_revenue"].sum())
     # Tolerance: SQLite ROUND() breaks half-cent ties away from zero while
     # numpy/pandas use banker's rounding, so per-row values can differ by
-    # at most ₹0.01. ₹1,000 on a ~₹648M total (0.00015%) proves the logic
+    # at most ₹0.01. ₹1,000 on a ~₹638M total (0.00016%) proves the logic
     # converges; anything bigger would signal a real formula divergence.
     check("delivered revenue matches CSV", abs(rev_sql - rev_csv) < 1000,
           f"(sql=₹{rev_sql:,.0f} csv=₹{rev_csv:,.0f} diff=₹{abs(rev_sql - rev_csv):,.2f})")
@@ -296,8 +316,16 @@ def run_checks(con):
 
 
 def main():
-    con, _ = build_db()
-    run_checks(con)
+    import argparse
+    ap = argparse.ArgumentParser(description="Validate the SQL layer.")
+    ap.add_argument("--raw", type=Path, default=RAW_CSV)
+    ap.add_argument("--clean", type=Path, default=CLEAN_CSV)
+    ap.add_argument("--no-composite-indexes", action="store_true",
+                    help="build the pre-Nov-2026 index set (benchmark use)")
+    args = ap.parse_args()
+    con, _ = build_db(raw_csv=args.raw, clean_csv=args.clean,
+                      composite_indexes=not args.no_composite_indexes)
+    run_checks(con, clean_csv=args.clean)
 
 
 if __name__ == "__main__":
