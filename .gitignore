@@ -13,6 +13,9 @@ venv/
 *.db
 *.sqlite3
 
+# Benchmark scratch files (1M-row intermediates, regenerated per run)
+benchmark/tmp/
+
 # OS / editors
 .DS_Store
 Thumbs.db
