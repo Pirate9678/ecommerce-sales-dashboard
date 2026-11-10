@@ -1,0 +1,77 @@
+{
+  "baseline": {
+    "generate_58k": 2.88,
+    "clean_58k": 1.72,
+    "validate_58k": 3.62,
+    "generate_1m": 31.0,
+    "clean_1m": 24.45
+  },
+  "measured": {
+    "generate_58k": {
+      "s": 1.19,
+      "peak_rss_mb": 141
+    },
+    "clean_58k": {
+      "s": 1.87,
+      "peak_rss_mb": 121
+    },
+    "validate_58k": {
+      "s": 3.06,
+      "peak_rss_mb": 128
+    },
+    "generate_1m": {
+      "s": 15.69,
+      "peak_rss_mb": 1334
+    },
+    "clean_1m": {
+      "s": 21.53,
+      "peak_rss_mb": 920
+    },
+    "validate_1m": {
+      "s": 63.99,
+      "peak_rss_mb": 1941
+    }
+  },
+  "views": {
+    "58k": {
+      "composite": {
+        "vw_monthly_revenue_by_region": 0.010224397000001773,
+        "vw_top_products": 0.03457094700024754,
+        "vw_customer_demographics": 0.05780738899966309,
+        "vw_yoy_growth": 0.007193985999947472,
+        "vw_category_share": 0.01795826399984435,
+        "vw_payment_method_mix": 0.007418962999963696,
+        "vw_discount_impact": 0.0537440059997607
+      },
+      "single_col": {
+        "vw_monthly_revenue_by_region": 0.05367165699999532,
+        "vw_top_products": 0.05458329599969147,
+        "vw_customer_demographics": 0.07852185299998382,
+        "vw_yoy_growth": 0.03130284799999572,
+        "vw_category_share": 0.03449535300023854,
+        "vw_payment_method_mix": 0.027000767000117776,
+        "vw_discount_impact": 0.050307513999996445
+      }
+    },
+    "1m": {
+      "composite": {
+        "vw_monthly_revenue_by_region": 0.20652741300000343,
+        "vw_top_products": 0.749777498000185,
+        "vw_customer_demographics": 0.9028003449998323,
+        "vw_yoy_growth": 0.14182993499980512,
+        "vw_category_share": 0.44827272400016227,
+        "vw_payment_method_mix": 0.1387506289997873,
+        "vw_discount_impact": 1.092846763000125
+      },
+      "single_col": {
+        "vw_monthly_revenue_by_region": 1.1871116219999749,
+        "vw_top_products": 1.1872028289999434,
+        "vw_customer_demographics": 1.6558088150000003,
+        "vw_yoy_growth": 0.7132828619996872,
+        "vw_category_share": 0.7674832319999041,
+        "vw_payment_method_mix": 0.6737691900002574,
+        "vw_discount_impact": 1.0985495479999372
+      }
+    }
+  }
+}
